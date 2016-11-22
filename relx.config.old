@@ -1,0 +1,4 @@
+{release, {news_release, "0.1.0"}, [news]}.
+{extended_start_script, true}.
+{sys_config, "rel/sys.config"}.
+{vm_args, "rel/vm.args"}.
