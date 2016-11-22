@@ -80,13 +80,16 @@ insert([], Acc) ->
 	end,
 	{atomic, Keys} = mnesia:transaction(Q),
 	Next = get_next_id(Keys),
-	Acc1 = 	Acc#news{id = Next},
+	Date = get_time(calendar:universal_time()),
+	io:format("Date: ~p~n", [Date]),
+	Acc1 = 	Acc#news{id = Next, cdate = Date, udate = Date},
 	F = fun() ->
 		mnesia:write(Acc1)
 	end,
-	mnesia:transaction(F),
+	Ret = mnesia:transaction(F),
+	io:format("Mnesia returned: ~p~n", [Ret]),
 	BinNext = list_to_binary(integer_to_list(Next)),
-	<<"{\"id\":\"", BinNext/binary, "\"}">>;
+	<<"{\"id\":\"", BinNext/binary, "\",\"create_time\":\"", Date/binary, "\"}">>;
 insert([{<<"content">>, Content}|T], Acc) ->
 	io:format("insert content\n"),
 	Acc1 = Acc#news{content = Content},
@@ -102,3 +105,13 @@ insert(Val, Acc) ->
 get_next_id([]) -> 1;
 get_next_id(Keys) ->
 	lists:max(Keys) + 1.
+
+get_time({{Year, Month, Day}, {Hour, Min, Sec}}) ->
+	BinYear = list_to_binary(integer_to_list(Year)),
+	BinMonth = list_to_binary(integer_to_list(Month)),
+	BinDay = list_to_binary(integer_to_list(Day)),
+	BinHour = list_to_binary(integer_to_list(Hour)),
+	BinMin = list_to_binary(integer_to_list(Min)),
+	BinSec = list_to_binary(integer_to_list(Sec)),
+	<<BinYear/binary, "/", BinMonth/binary, "/", BinDay/binary, " ",
+	BinHour/binary, ":", BinMin/binary, ":", BinSec/binary, " UTC">>.
