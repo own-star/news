@@ -5,6 +5,7 @@
 -export([allow_missing_post/2]).
 -export([content_types_provided/2]).
 -export([content_types_accepted/2]).
+-export([delete_resource/2, delete_completed/2]).
 -export([handle_json/2, handle_get/2]).
 
 -include_lib("stdlib/include/qlc.hrl").
@@ -26,7 +27,7 @@ init(_Transport, _Req, _Opts) ->
 		    {upgrade, protocol, cowboy_rest}.
 
 allowed_methods(Req, State) ->
-	{[<<"GET">>, <<"POST">>, <<"PUT">>], Req, State}.
+	{[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>], Req, State}.
 
 
 allow_missing_post(Req, Opts) ->
@@ -45,6 +46,19 @@ content_types_provided(Req, State) ->
 		{<<"application/json">>, handle_get}
 	], Req, State}.
 
+delete_resource(Req, State) ->
+	io:format("Delete: ~p~n", [Req]),
+	{NewsId, Req1} = cowboy_req:binding(news_id, Req),
+	Result =case NewsId of
+		undefined -> <<"{\"news_not_found\"}">>;
+		_ -> delete(binary_to_integer(NewsId))
+	end,
+	{Result, Req1, State}.
+
+delete_completed(Req, State) ->
+	{ok, Req1} = cowboy_req:reply(200, [], <<"{\"deleted\"}">>, Req),
+	{true, Req1, State}.
+
 handle_json(Req, State) ->
 	io:format("Json\n"),
 	{ok, Body, Req1} = cowboy_req:body(Req),
@@ -54,7 +68,11 @@ handle_json(Req, State) ->
 			io:format("Get body: ~p~n~p~n", [Body,Val]),
 			{Method, Req2} = cowboy_req:method(Req1),
 			{NewsId, Req3} = cowboy_req:binding(news_id, Req2),
-			Insert = handle_data(Val, Method, binary_to_integer(NewsId)),
+			News = case NewsId of
+				undefined -> NewsId;
+				_ -> binary_to_integer(NewsId)
+			end,
+			Insert = handle_data(Val, Method, News),
 			{ok, Req4} = cowboy_req:reply(200, [], Insert, Req3),
 			{true, Req4, State};
 		false ->
@@ -83,6 +101,17 @@ handle_data(Val, <<"PUT">>, NewsId) ->
 	update(Val, NewsId);
 handle_data(Val, <<"POST">>, _NewsId) ->
 	insert(Val, #news{}).
+
+delete(NewsId) ->
+	F = fun() ->
+		mnesia:delete({news, NewsId})
+	end,
+	{Res, _} = mnesia:transaction(F),
+	io:format("Mnesia has returned: ~p~n", [Res]),
+	case Res of
+		atomic -> true;
+		aborted -> false
+	end.
 
 update(Val, NewsId) when is_integer(NewsId) ->
 		[News] = do(qlc:q([X || X <- mnesia:table(news),
