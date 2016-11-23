@@ -36,19 +36,19 @@ content_types_accepted(Req, State) ->
 
 content_types_provided(Req, State) ->
 	{[
-		{<<"*/*">>, handle_get}
+		{<<"application/json">>, handle_get}
 	], Req, State}.
 
 delete_resource(Req, State) ->
 	{NewsId, Req1} = cowboy_req:binding(news_id, Req),
-	Result =case NewsId of
-		undefined -> <<"{\"news_not_found\"}">>;
+	Result = case NewsId of
+		undefined -> false;
 		_ -> delete(binary_to_integer(NewsId))
 	end,
 	{Result, Req1, State}.
 
 delete_completed(Req, State) ->
-	{ok, Req1} = cowboy_req:reply(200, [], <<"{\"deleted\"}">>, Req),
+	{ok, Req1} = cowboy_req:reply(200, [], <<"{\"success\":\"deleted\"}">>, Req),
 	{true, Req1, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%% CallBack Handlers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -80,8 +80,14 @@ handle_get(Req, State) ->
 		undefined ->
 			do(qlc:q([{X#news.id, X#news.udate, X#news.title} || 
 					X <- mnesia:table(news)]));
-		_ -> do(qlc:q([X || 
-					X <- mnesia:table(news), X#news.id =:= binary_to_integer(NewsId)]))
+		_ ->
+		   IntNewsId = binary_to_integer(NewsId),
+	   		case is_exists(IntNewsId) of
+				false -> [{<<"error">>, <<"does_not_exists">>}];
+				true ->
+					do(qlc:q([X || 
+						X <- mnesia:table(news), X#news.id =:= binary_to_integer(NewsId)]))
+			end
 	end,
 	Json = get_json(List, []),
 	{ok, Req2} =cowboy_req:reply(200, [], Json,  Req1),
@@ -97,19 +103,28 @@ handle_data(Val, <<"POST">>, _NewsId) ->
 	insert(Val, #news{}).
 
 delete(NewsId) ->
-	F = fun() ->
-		mnesia:delete({news, NewsId})
-	end,
-	{Res, _} = mnesia:transaction(F),
-	case Res of
-		atomic -> true;
-		aborted -> false
+	case is_exists(NewsId) of
+		false -> false;
+		true ->
+			F = fun() ->
+				mnesia:delete({news, NewsId})
+			end,
+			{Res, _} = mnesia:transaction(F),
+			case Res of
+				atomic -> true;
+				aborted -> false
+			end
 	end.
 
 update(Val, NewsId) when is_integer(NewsId) ->
-		[News] = do(qlc:q([X || X <- mnesia:table(news),
+	case is_exists(NewsId) of
+		true ->
+			[News] = do(qlc:q([X || X <- mnesia:table(news),
 								X#news.id =:= NewsId])),
-	update(Val, News);
+			update(Val, News);
+		false ->
+			<<"{\"error\":\"does_not_exists\"}">>
+	end;
 update([{<<"title">>, Title} | Rest], #news{} = News0) ->
 	News = News0#news{title = Title},
 	update(Rest, News);
@@ -126,7 +141,13 @@ update([], #news{} = News0) ->
 	case Res of 
 		aborted -> <<"{\"error\":\"not_updated\"}">>;
 		atomic -> <<"{\"success\":\"updated\"}">>
-	end.
+	end;
+update(_Val, _NewsId) ->
+	<<"{\"error\":\"bad_match\"}">>.
+
+is_exists(NewsId) ->
+	NewsList = do(qlc:q([ X#news.id || X <- mnesia:table(news)])),
+	lists:member(NewsId, NewsList).
 
 insert([], #news{content = undefined}) ->
 	<<"{\"error\":\"field_content_not_presents\"}">>;
@@ -181,7 +202,9 @@ get_json([{Id, UpdateDate, Title} | Rest], Acc) ->
 	get_json(Rest, [[{<<"id">>, BinId}, {<<"update_time">>, UpdateDate}, {<<"title">>, Title}] | Acc]);
 get_json([{_, Id, Title, Content, CreateDate, UpdateDate}], _Acc) ->
 	BinId = list_to_binary(integer_to_list(Id)),
-	jsx:encode([{<<"id">>, BinId}, {<<"create_time">>, CreateDate}, {<<"update_time">>, UpdateDate}, {<<"title">>, Title}, {<<"content">>, Content}]).
+	jsx:encode([{<<"id">>, BinId}, {<<"create_time">>, CreateDate}, {<<"update_time">>, UpdateDate}, {<<"title">>, Title}, {<<"content">>, Content}]);
+get_json(List, _Acc) ->
+	jsx:encode(List).
 
 do(Q) ->
 	F = fun() -> qlc:e(Q) end,
