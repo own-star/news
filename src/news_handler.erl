@@ -75,7 +75,7 @@ delete_resource(Req, State) ->
 	case delete(binary_to_integer(NewsId)) of
 		false -> 
 			{ok, Req2} = cowboy_req:reply(500, [], 
-				<<"{\"error\":\"does_not_deleted\"}">>, Req1),
+				<<"{\"error\":\"has_not_deleted\"}">>, Req1),
 			{false, Req2, State};
 		true -> delete(binary_to_integer(NewsId)),
 			{true, Req1, State}
@@ -100,7 +100,7 @@ handle_json(Req, State) ->
 			end,
 			Insert = handle_data(Val, Method, IntNewsId),
 			{ok, Req4} = cowboy_req:reply(200, [], Insert, Req3),
-			{true, Req4, State};
+			{halt, Req4, State};
 		false ->
 			{ok, Req2} =
 			 cowboy_req:reply(400, [], 
@@ -125,7 +125,7 @@ handle_get(Req, State) ->
 	end,
 	Json = get_json(List, []),
 	{ok, Req2} =cowboy_req:reply(200, [], Json,  Req1),
-	{true, Req2, State}.
+	{halt, Req2, State}.
 
 
 is_exists(NewsId) ->
