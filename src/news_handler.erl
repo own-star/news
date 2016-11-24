@@ -7,7 +7,8 @@
 -export([allow_missing_post/2]).
 -export([content_types_provided/2]).
 -export([content_types_accepted/2]).
--export([delete_resource/2, delete_completed/2]).
+-export([resource_exists/2]).
+-export([delete_resource/2, delete_completed/2, is_exists/1]).
 
 %% Handlers
 -export([handle_json/2, handle_get/2]).
@@ -39,13 +40,46 @@ content_types_provided(Req, State) ->
 		{<<"application/json">>, handle_get}
 	], Req, State}.
 
+resource_exists(Req, State) ->
+	{NewsId, Req1} = cowboy_req:binding(news_id, Req),
+	{Method, Req2} = cowboy_req:method(Req1),
+	case NewsId of
+		undefined ->
+			case Method of
+				<<"DELETE">> ->
+					{ok, Req3} = cowboy_req:reply(400, [],
+						<<"{\"error\":\"bad_request\"}">>, Req2),
+					{false, Req3, State};
+				<<"PUT">> ->
+					{ok, Req3} = cowboy_req:reply(400, [],
+						<<"{\"error\":\"bad_request\"}">>, Req2),
+					{false, Req3, State};
+				_ -> {true, Req2, State}
+			end;
+		_ -> 
+			IntNewsId = binary_to_integer(NewsId),
+			case is_exists(IntNewsId) of
+				true -> 
+					{true, Req1, State};
+				false when Method =:= <<"PUT">> ->
+					{true, Req1, State};
+				false ->
+					{ok, Req2} = cowboy_req:reply(404, [],
+						<<"{\"error\":\"resource_does_not_exists\"}">>, Req1),
+					{false, Req2, State}
+			end
+	end.
+
 delete_resource(Req, State) ->
 	{NewsId, Req1} = cowboy_req:binding(news_id, Req),
-	Result = case NewsId of
-		undefined -> false;
-		_ -> delete(binary_to_integer(NewsId))
-	end,
-	{Result, Req1, State}.
+	case delete(binary_to_integer(NewsId)) of
+		false -> 
+			{ok, Req2} = cowboy_req:reply(500, [], 
+				<<"{\"error\":\"does_not_deleted\"}">>, Req1),
+			{false, Req2, State};
+		true -> delete(binary_to_integer(NewsId)),
+			{true, Req1, State}
+	end.
 
 delete_completed(Req, State) ->
 	{ok, Req1} = cowboy_req:reply(200, [], <<"{\"success\":\"deleted\"}">>, Req),
@@ -60,11 +94,11 @@ handle_json(Req, State) ->
 			Val = jsx:decode(Body),
 			{Method, Req2} = cowboy_req:method(Req1),
 			{NewsId, Req3} = cowboy_req:binding(news_id, Req2),
-			News = case NewsId of
+			IntNewsId = case NewsId of
 				undefined -> NewsId;
 				_ -> binary_to_integer(NewsId)
 			end,
-			Insert = handle_data(Val, Method, News),
+			Insert = handle_data(Val, Method, IntNewsId),
 			{ok, Req4} = cowboy_req:reply(200, [], Insert, Req3),
 			{true, Req4, State};
 		false ->
@@ -94,26 +128,26 @@ handle_get(Req, State) ->
 	{true, Req2, State}.
 
 
+is_exists(NewsId) ->
+	NewsList = do(qlc:q([ X#news.id || X <- mnesia:table(news)])),
+	lists:member(NewsId, NewsList).
+
 
 %%%%%%%%%%%%%%%%%%%  Privat Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+handle_data(Val, <<"POST">>, undefined) ->
+	insert(Val, #news{}, 0);
 handle_data(Val, <<"PUT">>, NewsId) ->
-	update(Val, NewsId);
-handle_data(Val, <<"POST">>, _NewsId) ->
-	insert(Val, #news{}).
+	update(Val, NewsId).
 
 delete(NewsId) ->
-	case is_exists(NewsId) of
-		false -> false;
-		true ->
-			F = fun() ->
-				mnesia:delete({news, NewsId})
-			end,
-			{Res, _} = mnesia:transaction(F),
-			case Res of
-				atomic -> true;
-				aborted -> false
-			end
+	F = fun() ->
+		mnesia:delete({news, NewsId})
+	end,
+	{Res, _} = mnesia:transaction(F),
+	case Res of
+		atomic -> true;
+		aborted -> false
 	end.
 
 update(Val, NewsId) when is_integer(NewsId) ->
@@ -123,7 +157,7 @@ update(Val, NewsId) when is_integer(NewsId) ->
 								X#news.id =:= NewsId])),
 			update(Val, News);
 		false ->
-			<<"{\"error\":\"does_not_exists\"}">>
+			insert(Val, #news{}, NewsId)
 	end;
 update([{<<"title">>, Title} | Rest], #news{} = News0) ->
 	News = News0#news{title = Title},
@@ -145,20 +179,20 @@ update([], #news{} = News0) ->
 update(_Val, _NewsId) ->
 	<<"{\"error\":\"bad_match\"}">>.
 
-is_exists(NewsId) ->
-	NewsList = do(qlc:q([ X#news.id || X <- mnesia:table(news)])),
-	lists:member(NewsId, NewsList).
-
-insert([], #news{content = undefined}) ->
+insert([], #news{content = undefined}, _NewsId) ->
 	<<"{\"error\":\"field_content_not_presents\"}">>;
-insert([], #news{title = undefined}) ->
+insert([], #news{title = undefined}, _NewsId) ->
 	<<"{\"error\":\"field_title_not_present\"}">>;
-insert([], Acc) ->
-	Q = fun() ->
-		mnesia:all_keys(news)
+insert([], Acc, NewsId) ->
+	Next = case NewsId of
+		0 ->
+			Q = fun() ->
+				mnesia:all_keys(news)
+			end,
+			{atomic, Keys} = mnesia:transaction(Q),
+			get_next_id(Keys);
+		_ -> NewsId
 	end,
-	{atomic, Keys} = mnesia:transaction(Q),
-	Next = get_next_id(Keys),
 	Date = get_time(calendar:universal_time()),
 	Acc1 = 	Acc#news{id = Next, cdate = Date, udate = Date},
 	F = fun() ->
@@ -172,13 +206,13 @@ insert([], Acc) ->
 		aborted ->
 			<<"{\"error\":\"not_added\"}">>
 	end;
-insert([{<<"content">>, Content}|T], Acc) ->
+insert([{<<"content">>, Content}|T], Acc, NewsId) ->
 	Acc1 = Acc#news{content = Content},
-	insert(T, Acc1);
-insert([{<<"title">>, Title}|T], Acc) ->
+	insert(T, Acc1, NewsId);
+insert([{<<"title">>, Title}|T], Acc, NewsId) ->
 	Acc1 = Acc#news{title = Title},
-	insert(T, Acc1);
-insert(_Val, _Acc) ->
+	insert(T, Acc1, NewsId);
+insert(_Val, _Acc, _NewsId) ->
 	<<"{\"error\":\"bad_match\"}">>.
 
 get_next_id([]) -> 1;
