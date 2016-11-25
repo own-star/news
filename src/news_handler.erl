@@ -3,11 +3,13 @@
 -export([init/3]).
 
 %% REST Callbacks
+-export([service_available/2]).
 -export([allowed_methods/2]).
 -export([allow_missing_post/2]).
 -export([content_types_provided/2]).
 -export([content_types_accepted/2]).
 -export([resource_exists/2]).
+-export([previously_existed/2]).
 -export([delete_resource/2, delete_completed/2, is_exists/1]).
 
 %% Handlers
@@ -21,6 +23,17 @@ init(_Transport, _Req, _Opts) ->
 		    {upgrade, protocol, cowboy_rest}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% REST CallBacks %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+service_available(Req, State) ->
+	F = fun() ->
+			mnesia:all_keys(news)
+	end,
+	case mnesia:transaction(F) of
+		{aborted, _} ->
+			Req1 = cowboy_req:set_resp_body(<<"{\"error\":\"databese_error\"}">>, Req),
+			{false, Req1, State};
+		{atomic, _} -> {true, Req, State}
+	end.
 
 allowed_methods(Req, State) ->
 	{[<<"GET">>, <<"POST">>, <<"PUT">>, <<"DELETE">>], Req, State}.
@@ -47,11 +60,11 @@ resource_exists(Req, State) ->
 		undefined ->
 			case Method of
 				<<"DELETE">> ->
-					{ok, Req3} = cowboy_req:reply(400, [],
+					Req3 = cowboy_req:set_resp_body(
 						<<"{\"error\":\"bad_request\"}">>, Req2),
 					{false, Req3, State};
 				<<"PUT">> ->
-					{ok, Req3} = cowboy_req:reply(400, [],
+					Req3 = cowboy_req:set_resp_body(
 						<<"{\"error\":\"bad_request\"}">>, Req2),
 					{false, Req3, State};
 				_ -> {true, Req2, State}
@@ -61,28 +74,28 @@ resource_exists(Req, State) ->
 			case is_exists(IntNewsId) of
 				true -> 
 					{true, Req1, State};
-				false when Method =:= <<"PUT">> ->
-					{true, Req1, State};
 				false ->
-					{ok, Req2} = cowboy_req:reply(404, [],
+					Req4 = cowboy_req:set_resp_body(
 						<<"{\"error\":\"resource_does_not_exists\"}">>, Req1),
-					{false, Req2, State}
+					{false, Req4, State}
 			end
 	end.
+
+previously_existed(Req, State) ->
+	{false, Req, State}.
 
 delete_resource(Req, State) ->
 	{NewsId, Req1} = cowboy_req:binding(news_id, Req),
 	case delete(binary_to_integer(NewsId)) of
 		false -> 
-			{ok, Req2} = cowboy_req:reply(500, [], 
+			Req2 = cowboy_req:set_resp_body( 
 				<<"{\"error\":\"has_not_deleted\"}">>, Req1),
 			{false, Req2, State};
-		true -> delete(binary_to_integer(NewsId)),
-			{true, Req1, State}
+		true ->	{true, Req1, State}
 	end.
 
 delete_completed(Req, State) ->
-	{ok, Req1} = cowboy_req:reply(200, [], <<"{\"success\":\"deleted\"}">>, Req),
+	Req1 = cowboy_req:set_resp_body(<<"{\"success\":\"deleted\"}">>, Req),
 	{true, Req1, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%% CallBack Handlers %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -95,17 +108,27 @@ handle_json(Req, State) ->
 			{Method, Req2} = cowboy_req:method(Req1),
 			{NewsId, Req3} = cowboy_req:binding(news_id, Req2),
 			IntNewsId = case NewsId of
+				undefined when Method =:= <<"PUT">> ->
+					{halt, Req3};
 				undefined -> NewsId;
+				_ when Method =:= <<"POST">> ->
+					Req5 = cowboy_req:set_resp_body(
+						<<"{\"error\":\"bad_request\"}">>, Req3),
+					{halt, Req5};
 				_ -> binary_to_integer(NewsId)
 			end,
-			Insert = handle_data(Val, Method, IntNewsId),
-			{ok, Req4} = cowboy_req:reply(200, [], Insert, Req3),
-			{halt, Req4, State};
+			case IntNewsId of
+				{halt, Req6} ->
+					{false, Req6, State};
+				_ ->
+					Insert = handle_data(Val, Method, IntNewsId),
+					Req4 = cowboy_req:set_resp_body(Insert, Req3),
+					{true, Req4, State}
+			end;
 		false ->
-			{ok, Req2} =
-			 cowboy_req:reply(400, [], 
-				<<"{\"bad_json\"}">>, Req1),
-			{halt, Req2, State}
+			Req2 = cowboy_req:set_resp_body(
+				<<"{\"error\":\"bad_json\"}">>, Req1),
+			{false, Req2, State}
 	end.
 
 handle_get(Req, State) ->
@@ -130,7 +153,10 @@ handle_get(Req, State) ->
 
 is_exists(NewsId) ->
 	NewsList = do(qlc:q([ X#news.id || X <- mnesia:table(news)])),
-	lists:member(NewsId, NewsList).
+	case NewsList of
+		aborted -> false;
+		_ -> lists:member(NewsId, NewsList)
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%  Privat Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -144,10 +170,10 @@ delete(NewsId) ->
 	F = fun() ->
 		mnesia:delete({news, NewsId})
 	end,
-	{Res, _} = mnesia:transaction(F),
+	Res = mnesia:transaction(F),
 	case Res of
-		atomic -> true;
-		aborted -> false
+		{atomic, ok} -> true;
+		_ -> false
 	end.
 
 update(Val, NewsId) when is_integer(NewsId) ->
@@ -155,7 +181,10 @@ update(Val, NewsId) when is_integer(NewsId) ->
 		true ->
 			[News] = do(qlc:q([X || X <- mnesia:table(news),
 								X#news.id =:= NewsId])),
-			update(Val, News);
+			case News of 
+				aborted -> <<"{\"error\":\"database_error\"}">>;
+				_ -> update(Val, News)
+			end;
 		false ->
 			insert(Val, #news{}, NewsId)
 	end;
@@ -189,8 +218,11 @@ insert([], Acc, NewsId) ->
 			Q = fun() ->
 				mnesia:all_keys(news)
 			end,
-			{atomic, Keys} = mnesia:transaction(Q),
-			get_next_id(Keys);
+			{KeyRes, Keys} = mnesia:transaction(Q),
+			case KeyRes of
+				atomic -> get_next_id(Keys);
+				aborted -> <<"{\"error\":\"database_error\"}">>
+			end;
 		_ -> NewsId
 	end,
 	Date = get_time(calendar:universal_time()),
@@ -242,5 +274,8 @@ get_json(List, _Acc) ->
 
 do(Q) ->
 	F = fun() -> qlc:e(Q) end,
-	{atomic, Val} = mnesia:transaction(F),
-	Val.
+	{Res, Val} = mnesia:transaction(F),
+	case Res of
+		aborted -> aborted;
+		atomic -> Val
+	end.
