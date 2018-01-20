@@ -1,0 +1,1 @@
+-record(news, {id = 0, title = undefined, content = undefined, cdate, udate}).
