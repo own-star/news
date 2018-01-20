@@ -1,7 +1,0 @@
-{application,riakc,
-             [{description,"Riak Client"},
-              {vsn,"git"},
-              {applications,[kernel,stdlib,riak_pb]},
-              {registered,[]},
-              {env,[{timeout,60000}]},
-              {modules,[]}]}.
