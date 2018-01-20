@@ -13,7 +13,7 @@
 
 -define(SERVER, ?MODULE).
 
--include_lib("riakc/include/riakc.hrl").
+%-include_lib("riakc/include/riakc.hrl").
 
 -record(state, {pid, id}).
 
@@ -22,7 +22,6 @@ start_link() ->
 
 init([]) ->
 	{ok, Pid} = riakc_pb_socket:start_link("127.0.0.1", 8087),
-	io:format("Start news_riak pid:~p~n", [Pid]),
 	case riakc_pb_socket:get(Pid, <<"news">>, <<"count">>) of
 		{error,notfound} ->
 			NewCountObj = riakc_obj:new(<<"news">>, <<"count">>, <<"0">>),
@@ -35,6 +34,10 @@ init([]) ->
 			io:format("Unexpected get count: ~p~n", [Other]),
 			{ok, #state{pid = Pid, id = undefined}}
 	end.
+
+
+handle_call(ping, _ref, #state{pid = Pid} = State) ->
+	{reply, riakc_pb_socket:ping(Pid), State};
 
 handle_call({is_exists, Id}, _Ref, #state{pid = Pid} = State) ->
 	try riakc_pb_socket:get(Pid, <<"news">>, Id) of
@@ -65,17 +68,47 @@ handle_call({insert, _, _, _}, _Ref, #state{id = undefined} = State) ->
 	{reply, [{<<"error">>, <<"wrong db status">>}], State};
 
 handle_call({insert, Title, Content, Date}, _Ref, #state{pid = Pid, id = Id} = State) ->
-%	Date = get_time(calendar:universal_time()),
 	Obj = riakc_obj:new(<<"news">>, integer_to_binary(Id), [{<<"title">>, Title}, {<<"content">>, Content}, {<<"date">>, Date}]),
 	try
 		Res = riakc_pb_socket:put(Pid, Obj),
 		io:format("put res: ~p~n", [Res]),
 		CountObj = riakc_obj:new(<<"news">>, <<"count">>, integer_to_binary(Id)),
 		riakc_pb_socket:put(Pid, CountObj),
-		{reply, Res, State#state{id = Id + 1}}
+		{reply, [{<<"success">>, Res}], State#state{id = Id + 1}}
 	catch Err ->
 		{reply, [{<<"error">>, list_to_binary(Err)}], State}
 	end;
+
+handle_call({update, Id, Title, Content, Date}, _Ref, #state{pid = Pid} = State) ->
+	try riakc_pb_socket:get(Pid, <<"news">>, Id) of
+		{ok, Obj} ->
+			NewObj = riakc_obj:update_value(Obj, [{<<"title">>, Title}, {<<"content">>, Content}, {<<"date">>, Date}]),
+			case riakc_pb_socket:put(Pid, NewObj) of
+				{ok, _} ->
+					{reply, [{<<"success">>, <<"update">>}], State};
+				ok ->
+					{reply, [{<<"success">>, <<"update">>}], State};
+				Other ->
+					{reply, [{<<"error">>, term_to_binary(Other)}], State}
+			end;
+		_ ->
+			{reply, [{<<"error">>, <<"invalid_argument">>}],State}
+	catch
+		Err ->
+			{reply, [{<<"error">>, list_to_binary(Err)}],State}
+	end;
+
+handle_call({delete, Id}, _Ref, #state{pid = Pid} = State) ->
+	try riakc_pb_socket:delete(Pid, <<"news">>, Id) of
+		ok -> 
+			{reply, [{<<"success">>, <<"news ", Id/binary, " deleted">>}], State};
+		Other ->
+			{reply, [{<<"error">>, list_to_binary(Other)}], State}
+	catch
+		Err ->
+			{reply, [{<<"error">>, list_to_binary(Err)}], State}
+	end;
+
 
 handle_call(get_pid, _Ref, State) ->
 	io:format("news_riak get_pid~n"),

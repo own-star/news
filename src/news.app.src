@@ -12,7 +12,6 @@
 		kernel,
 		stdlib,
 		cowboy,
-		mnesia,
 		jsx
 	]},
 	{mod, {news_app, []}},

@@ -5,7 +5,7 @@
 -export([stop/1]).
 
 start(_Type, _Args) ->
-	mnesia:start(),
+%	mnesia:start(),
 	Dispatch = cowboy_router:compile([
 		{'_', [
 			{"/news/[:news_id]", news_handler, []}
