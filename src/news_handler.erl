@@ -146,7 +146,6 @@ handle_data(Val, <<"POST">>, undefined) ->
 	Title = proplists:get_value(<<"title">>, Val),
 	Content = proplists:get_value(<<"content">>, Val),
 	Date = get_time(calendar:universal_time()),
-	io:format("Title: ~p~nContent: ~p~n", [Title, Content]),
 	Res =   gen_server:call(news_riak, {insert, Title, Content, Date}),
 	jsx:encode(Res);
 

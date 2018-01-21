@@ -21,18 +21,24 @@ start_link() ->
 	gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 init([]) ->
-	{ok, Pid} = riakc_pb_socket:start_link("127.0.0.1", 8087),
-	case riakc_pb_socket:get(Pid, <<"news">>, <<"count">>) of
-		{error,notfound} ->
-			NewCountObj = riakc_obj:new(<<"news">>, <<"count">>, <<"0">>),
-			riakc_pb_socket:put(Pid, NewCountObj),
-			{ok, #state{pid = Pid, id = 0}};
-		{ok, CountObj} ->
-			Count = riakc_obj:get_value(CountObj),
-			{ok, #state{pid = Pid, id = binary_to_integer(Count) + 1}};
-		Other ->
-			io:format("Unexpected get count: ~p~n", [Other]),
-			{ok, #state{pid = Pid, id = undefined}}
+	try
+		{ok, Pid} = riakc_pb_socket:start_link("127.0.0.1", 8087),
+		case riakc_pb_socket:get(Pid, <<"news">>, <<"count">>) of
+			{error,notfound} ->
+				NewCountObj = riakc_obj:new(<<"news">>, <<"count">>, <<"0">>),
+				riakc_pb_socket:put(Pid, NewCountObj),
+				{ok, #state{pid = Pid, id = 0}};
+			{ok, CountObj} ->
+				Count = riakc_obj:get_value(CountObj),
+				{ok, #state{pid = Pid, id = binary_to_integer(Count) + 1}};
+			Other ->
+				io:format("Unexpected get count: ~p~n", [Other]),
+				{ok, #state{pid = Pid, id = undefined}}
+		end
+	catch
+		Err ->
+			io:format("Database not found"),
+			{stop, {shutdown, Err}}
 	end.
 
 
@@ -142,5 +148,4 @@ get_list([H | T], Pid, Acc) ->
 			get_list(T, Pid, Acc)
 	end;
 get_list([], _Pid, Acc) ->
-	io:format("List: ~p~n", [Acc]),
 	Acc.
