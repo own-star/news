@@ -17,7 +17,8 @@ DELETE /news/$id - Deletes news
 
 
 Add news
-$ curl -X POST -H "Accept: application/json" -d '{"content":"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" /><title>Apache2 Debian Default Page: It works</title></head><body><p>Firts</p><p>Second</p></body></html>", "title":"Title1"}' http://localhost:8008/news
+curl -X POST -H "Accept: application/json" -d '{"content":"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\"><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/><title>Hello</title></head><body>Hello World!</body></html>", "title":"Hello"}' http://localhost:8008/news
+
 
 Returns:
 {"id":"$id","date":"$date $time UTC"} | {"error":"$reason"}
@@ -38,7 +39,8 @@ Returns:
 
 
 Update news by $id
-$ curl -X PUT -H "Accept: application/json" -d '{"title":"Title2"}' http://localhost:8008/news/$id
+curl -X POST -H "Accept: application/json" -d '{"content":"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\"><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/><title>New WEB Title</title></head><body>New Content</body></html>", "title":"NewTitle"}' http://localhost:8008/news
+
 
 Returns:
 {"success":"updated"} | {"error":reason"}

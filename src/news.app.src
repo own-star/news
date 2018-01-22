@@ -2,7 +2,7 @@
 
 {application, news, [
 	{description, "Simple news server."},
-	{vsn, "0.1.0"},
+	{vsn, "0.1.1"},
 	{modules, []},
 	{registered, [news_sup]},
 	{included_applications, [
@@ -12,6 +12,7 @@
 		kernel,
 		stdlib,
 		cowboy,
+		xmerl,
 		jsx
 	]},
 	{mod, {news_app, []}},

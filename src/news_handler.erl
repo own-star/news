@@ -15,7 +15,7 @@
 %% Handlers
 -export([handle_json/2, handle_get/2]).
 
--include_lib("stdlib/include/qlc.hrl").
+%-include_lib("stdlib/include/qlc.hrl").
 -include("news.hrl").
 
 
@@ -143,21 +143,34 @@ is_exists(NewsId) ->
 %%%%%%%%%%%%%%%%%%%  Privat Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 handle_data(Val, <<"POST">>, undefined) ->
-	Title = proplists:get_value(<<"title">>, Val),
-	Content = proplists:get_value(<<"content">>, Val),
-	Date = get_time(calendar:universal_time()),
-	Res =   gen_server:call(news_riak, {insert, Title, Content, Date}),
-	jsx:encode(Res);
+	try
+		Content = proplists:get_value(<<"content">>, Val),
+		xmerl_scan:string(binary_to_list(Content)),
+		Title = proplists:get_value(<<"title">>, Val),
+%		xmerl_scan:string(binary_to_list(Content), [{validation, dtd}]),
+		Date = get_time(calendar:universal_time()),
+		Res =   gen_server:call(news_riak, {insert, Title, Content, Date}),
+		jsx:encode(Res)
+	catch Err ->
+		io:format("Parse error: ~p~n", [Err]),
+		<<"{\"error\":\"not_valid_page\"}">>
+	end;
 
 handle_data(Val, <<"PUT">>, NewsId) ->
 	update(Val, NewsId).
 
 update(Val, NewsId) ->
-	Title = proplists:get_value(<<"title">>, Val),
-	Content = proplists:get_value(<<"content">>, Val),
-	Date = get_time(calendar:universal_time()),
-	Res = gen_server:call(news_riak, {update, NewsId, Title, Content, Date}),
-	jsx:encode(Res).
+	try
+		Content = proplists:get_value(<<"content">>, Val),
+		xmerl_scan:string(binary_to_list(Content)),
+		Title = proplists:get_value(<<"title">>, Val),
+		Date = get_time(calendar:universal_time()),
+		Res = gen_server:call(news_riak, {update, NewsId, Title, Content, Date}),
+		jsx:encode(Res)
+	catch Err ->
+		io:format("Parse error: ~p~n", [Err]),
+		<<"{\"error\":\"not_valid_page\"}">>
+	end.
 
 get_time({{Year, Month, Day}, {Hour, Min, Sec}}) ->
 	BinYear = list_to_binary(integer_to_list(Year)),
@@ -168,5 +181,4 @@ get_time({{Year, Month, Day}, {Hour, Min, Sec}}) ->
 	BinSec = list_to_binary(integer_to_list(Sec)),
 	<<BinYear/binary, "/", BinMonth/binary, "/", BinDay/binary, " ",
 	BinHour/binary, ":", BinMin/binary, ":", BinSec/binary, " UTC">>.
-
 
