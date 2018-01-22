@@ -11,7 +11,7 @@ $ make
 
 $ make run
 
-##Methods
+## Methods
 
 **GET /news** - Returns the list of news<br>
 **GET /news/$id** - Retrieves an individual news<br>
